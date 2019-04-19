@@ -12,6 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -122,9 +123,9 @@ namespace ReverseEngineer20
 
             foreach (var file in filePaths.AdditionalFiles)
             {
-                PostProcess(file, reverseEngineerOptions.IdReplace);
+                PostProcess(file, reverseEngineerOptions);
             }
-            PostProcess(filePaths.ContextFile, reverseEngineerOptions.IdReplace);
+            PostProcess(filePaths.ContextFile, reverseEngineerOptions);
 
             PostProcessContext(filePaths.ContextFile, reverseEngineerOptions);
 
@@ -178,17 +179,41 @@ namespace ReverseEngineer20
             File.WriteAllLines(contextFile, finalLines, Encoding.UTF8);
         }
 
-        private void PostProcess(string file, bool idReplace)
+        private void PostProcess(string file, ReverseEngineerOptions options)
         {
-            if (idReplace)
+            string[] text = File.ReadAllLines(file);
+            if (options.IdReplace)
             {
-                var text = File.ReadAllText(file);
-                text = text.Replace("Id, ", "ID, ");
-                text = text.Replace("Id }", "ID }");
-                text = text.Replace("Id }", "ID }");
-                text = text.Replace("Id)", "ID)");
-                text = text.Replace("Id { get; set; }", "ID { get; set; }");
-                File.WriteAllText(file, text, Encoding.UTF8);
+                for(int idx=0;idx<text.Length;++idx)
+                {
+                    text[idx] = text[idx].Replace("Id, ", "ID, ");
+                    text[idx] = text[idx].Replace("Id }", "ID }");
+                    text[idx] = text[idx].Replace("Id }", "ID }");
+                    text[idx] = text[idx].Replace("Id)", "ID)");
+                    text[idx] = text[idx].Replace("Id { get; set; }", "ID { get; set; }");
+                }
+            }
+
+            text = text.Where(x => !options.IgnoredColumns.Any(s => x.Contains(s))).ToArray();
+
+            if (options.UseFluentApiOnly)
+            {
+                File.WriteAllLines(file, text, Encoding.UTF8);
+            }
+            else
+            {
+                List<string> newText = new List<string>();
+                foreach (string line in text)
+                {
+                    if (line.Contains("public Guid"))
+                    {
+                        newText.Add($"\t\t[Column(TypeName=\"uniqueidentifier\")]");
+                    }
+
+                    newText.Add(line.Replace("byte[]","string"));
+                }
+
+                File.WriteAllLines(file, newText, Encoding.UTF8);
             }
         }
 

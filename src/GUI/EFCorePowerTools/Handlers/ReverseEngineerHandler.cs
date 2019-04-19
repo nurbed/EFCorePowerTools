@@ -133,7 +133,8 @@ namespace EFCorePowerTools.Handlers
                     SelectedToBeGenerated = modelDialog.SelectedTobeGenerated,
                     Dacpac = dacpacPath,
                     DefaultDacpacSchema = dacpacSchema,
-                    Tables = ptd.Tables
+                    Tables = ptd.Tables,
+                    IgnoredColumns = new List<string>()
                 };
 
                 _package.Dte2.StatusBar.Text = "Generating code...";

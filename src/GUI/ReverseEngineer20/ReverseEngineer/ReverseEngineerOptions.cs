@@ -25,5 +25,6 @@ namespace ReverseEngineer20
         [IgnoreDataMember]
         public string Dacpac { get; set; }
         public string DefaultDacpacSchema { get; set; }
+        public List<string> IgnoredColumns { get; set; }
     }
 }
