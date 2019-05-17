@@ -1,12 +1,15 @@
 ﻿using EFCore.SqlCe.Design.Internal;
+using EFCorePowerTools.Shared.Models;
 using EntityFrameworkCore.Scaffolding.Handlebars;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Design.Internal;
 using Microsoft.EntityFrameworkCore.Scaffolding;
+using Microsoft.EntityFrameworkCore.Scaffolding.Internal;
 using Microsoft.EntityFrameworkCore.Sqlite.Design.Internal;
 using Microsoft.EntityFrameworkCore.SqlServer.Design.Internal;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Design.Internal;
+using Pomelo.EntityFrameworkCore.MySql.Design.Internal;
 using ReverseEngineer20.ReverseEngineer;
 using System;
 using System.Collections.Generic;
@@ -44,6 +47,11 @@ namespace ReverseEngineer20
                 serviceCollection.AddSingleton<ITemplateFileService>(provider => new CustomTemplateFileService(reverseEngineerOptions.ProjectPath));
             }
 
+            if (reverseEngineerOptions.CustomReplacers != null)
+            {
+                serviceCollection.AddSingleton<ICandidateNamingService>(provider => new ReplacingCandidateNamingService(reverseEngineerOptions.CustomReplacers));
+            }
+
             if (reverseEngineerOptions.UseInflector)
             {
                 serviceCollection.AddSingleton<IPluralizer, InflectorPluralizer>();
@@ -58,17 +66,25 @@ namespace ReverseEngineer20
                     var sqlCeProvider = new SqlCeDesignTimeServices();
                     sqlCeProvider.ConfigureDesignTimeServices(serviceCollection);
                     break;
-                case DatabaseType.Npgsql:
-                    var npgsqlProvider = new NpgsqlDesignTimeServices();
-                    npgsqlProvider.ConfigureDesignTimeServices(serviceCollection);
-                    break;
                 case DatabaseType.SQLServer:
                     var provider = new SqlServerDesignTimeServices();
                     provider.ConfigureDesignTimeServices(serviceCollection);
+
+                    var spatial = new SqlServerNetTopologySuiteDesignTimeServices();
+                    spatial.ConfigureDesignTimeServices(serviceCollection);
+
                     if (!string.IsNullOrEmpty(reverseEngineerOptions.Dacpac))
                     {
                         serviceCollection.AddSingleton<IDatabaseModelFactory, SqlServerDacpacDatabaseModelFactory>();
                     }
+                    break;
+                case DatabaseType.Npgsql:
+                    var npgsqlProvider = new NpgsqlDesignTimeServices();
+                    npgsqlProvider.ConfigureDesignTimeServices(serviceCollection);
+                    break;
+                case DatabaseType.Mysql:
+                    var mysqlProvider = new MySqlDesignTimeServices();
+                    mysqlProvider.ConfigureDesignTimeServices(serviceCollection);
                     break;
                 case DatabaseType.SQLite:
                     var sqliteProvider = new SqliteDesignTimeServices();
@@ -80,7 +96,7 @@ namespace ReverseEngineer20
 
             var serviceProvider = serviceCollection.BuildServiceProvider();
             var scaffolder = serviceProvider.GetService<IReverseEngineerScaffolder>();
-
+                
             var schemas = new List<string>();
             if (reverseEngineerOptions.DefaultDacpacSchema != null)
             {
@@ -97,7 +113,7 @@ namespace ReverseEngineer20
             {
                 UseDatabaseNames = reverseEngineerOptions.UseDatabaseNames
             };
-
+                        
             var codeOptions = new ModelCodeGenerationOptions
             {
                 UseDataAnnotations = !reverseEngineerOptions.UseFluentApiOnly
@@ -107,7 +123,7 @@ namespace ReverseEngineer20
                     reverseEngineerOptions.Dacpac != null
                         ? reverseEngineerOptions.Dacpac
                         : reverseEngineerOptions.ConnectionString,
-                    reverseEngineerOptions.Tables,
+                    reverseEngineerOptions.Tables.Select(m => m.Name).ToArray(),
                     schemas,
                     @namespace,
                     "C#",
@@ -118,17 +134,17 @@ namespace ReverseEngineer20
 
             var filePaths = scaffolder.Save(
                 scaffoldedModel,
-                Path.Combine(reverseEngineerOptions.ProjectPath, reverseEngineerOptions.OutputPath),
+                Path.Combine(reverseEngineerOptions.ProjectPath, reverseEngineerOptions.OutputPath ?? string.Empty),
                 overwriteFiles: true);
+
+            PostProcessContext(filePaths.ContextFile, reverseEngineerOptions);
 
             foreach (var file in filePaths.AdditionalFiles)
             {
                 PostProcess(file, reverseEngineerOptions);
             }
             PostProcess(filePaths.ContextFile, reverseEngineerOptions);
-
-            PostProcessContext(filePaths.ContextFile, reverseEngineerOptions);
-
+            
             var result = new EfCoreReverseEngineerResult
             {
                 EntityErrors = errors,
@@ -161,13 +177,13 @@ namespace ReverseEngineer20
 
                 if (line.Contains("OnModelCreating")) inModelCreating = true;
 
-                if (inModelCreating && line.StartsWith("        }"))
+                if (!options.UseHandleBars && inModelCreating && line.StartsWith("        }"))
                 {
                     finalLines.Add(string.Empty);
                     finalLines.Add("            OnModelCreatingPartial(modelBuilder);");
                 }
 
-                if (inModelCreating && line.StartsWith("    }"))
+                if (!options.UseHandleBars && inModelCreating && line.StartsWith("    }"))
                 {
                     finalLines.Add(string.Empty);
                     finalLines.Add("        partial void OnModelCreatingPartial(ModelBuilder modelBuilder);");
@@ -181,40 +197,21 @@ namespace ReverseEngineer20
 
         private void PostProcess(string file, ReverseEngineerOptions options)
         {
-            string[] text = File.ReadAllLines(file);
+            var text = File.ReadAllLines(file, Encoding.UTF8);
             if (options.IdReplace)
             {
-                for(int idx=0;idx<text.Length;++idx)
+                for (int i = 0; i < text.Length; ++i)
                 {
-                    text[idx] = text[idx].Replace("Id, ", "ID, ");
-                    text[idx] = text[idx].Replace("Id }", "ID }");
-                    text[idx] = text[idx].Replace("Id }", "ID }");
-                    text[idx] = text[idx].Replace("Id)", "ID)");
-                    text[idx] = text[idx].Replace("Id { get; set; }", "ID { get; set; }");
+                    text[i] = text[i].Replace("Id, ", "ID, ");
+                    text[i] = text[i].Replace("Id }", "ID }");
+                    text[i] = text[i].Replace("Id }", "ID }");
+                    text[i] = text[i].Replace("Id)", "ID)");
+                    text[i] = text[i].Replace("Id { get; set; }", "ID { get; set; }");
+                    text[i] = text[i].TrimEnd();
                 }
             }
-
-            text = text.Where(x => !options.IgnoredColumns.Any(s => x.Contains(s))).ToArray();
-
-            if (options.UseFluentApiOnly)
-            {
-                File.WriteAllLines(file, text, Encoding.UTF8);
-            }
-            else
-            {
-                List<string> newText = new List<string>();
-                foreach (string line in text)
-                {
-                    if (line.Contains("public Guid"))
-                    {
-                        newText.Add($"\t\t[Column(TypeName=\"uniqueidentifier\")]");
-                    }
-
-                    newText.Add(line.Replace("byte[]","string"));
-                }
-
-                File.WriteAllLines(file, newText, Encoding.UTF8);
-            }
+			text = text.Where(x => !options.IgnoredColumns.Any(s => x.Contains(s))).ToArray();
+            File.WriteAllLines(file, text, Encoding.UTF8);
         }
 
         public string GenerateClassName(string value)
@@ -238,10 +235,10 @@ namespace ReverseEngineer20
             return className.Replace(" ", string.Empty);
         }
 
-        public List<string> GetDacpacTableNames(string dacpacPath)
+        public List<TableInformationModel> GetDacpacTables(string dacpacPath)
         {
             var builder = new DacpacTableListBuilder(dacpacPath);
-            return builder.GetTableNames();
+            return builder.GetTableDefinitions();
         }
     }
 }
