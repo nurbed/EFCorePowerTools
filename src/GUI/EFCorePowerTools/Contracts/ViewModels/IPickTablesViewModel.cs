@@ -6,36 +6,34 @@
     using System.ComponentModel;
     using System.Windows.Input;
     using EventArgs;
+    using ReverseEngineer20.ReverseEngineer;
     using Shared.Models;
 
     public interface IPickTablesViewModel : IViewModel
     {
         event EventHandler<CloseRequestedEventArgs> CloseRequested;
 
-        ICommand LoadedCommand { get; }
-        ICommand SaveSelectionCommand { get; }
-        ICommand LoadSelectionCommand { get; }
         ICommand OkCommand { get; }
         ICommand CancelCommand { get; }
 
-        ObservableCollection<ITableInformationViewModel> Tables { get; }
-        ICollectionView FilteredTables { get; }
-
         bool? TableSelectionThreeState { get; set; }
         string SearchText { get; set; }
+        IObjectTreeViewModel ObjectTree { get; }
 
         /// <summary>
-        /// Adds the <paramref name="tables"/> to the <see cref="Tables"/>, wrapping it in a new <see cref="ITableInformationViewModel"/> instance.
+        /// Adds the <paramref name="objects"/> to the <see cref="Tables"/>, wrapping it in a new <see cref="ITableInformationViewModel"/> instance.
         /// </summary>
-        /// <param name="tables">The tables to add.</param>
-        void AddTables(IEnumerable<TableInformationModel> tables);
+        /// <param name="objects">The tables to add.</param>
+        void AddObjects(IEnumerable<TableModel> objects, IEnumerable<Schema> customReplacers);
 
         /// <summary>
-        /// Selects the <paramref name="tables"/> from the <see cref="Tables"/> property, setting the <see cref="ITableInformationViewModel.IsSelected"/> to true, if both collections contain the table.
+        /// Selects the <paramref name="objects"/> from the <see cref="Tables"/> property, setting the <see cref="ITableInformationViewModel.IsSelected"/> to true, if both collections contain the table.
         /// </summary>
-        /// <param name="tables">The tables to select.</param>
-        void SelectTables(IEnumerable<TableInformationModel> tables);
+        /// <param name="objects">The tables to select.</param>
+        void SelectObjects(IEnumerable<SerializationTableModel> objects);
 
-        TableInformationModel[] GetResult();
+        SerializationTableModel[] GetSelectedObjects();
+
+        Schema[] GetRenamedObjects();
     }
 }

@@ -6,9 +6,12 @@ using VSLangProj;
 
 namespace EFCorePowerTools.Extensions
 {
+    using ErikEJ.SqlCeToolbox.Helpers;
     using Microsoft.VisualStudio.ProjectSystem;
     using Microsoft.VisualStudio.ProjectSystem.Properties;
-    using Shared.Enums;
+    using NuGet.ProjectModel;
+    using ReverseEngineer20;
+    using System.Linq;
 
     internal static class ProjectExtensions
     {
@@ -46,12 +49,50 @@ namespace EFCorePowerTools.Extensions
             return null;
         }
 
-        public static string GetCspProperty(this Project project, string propertyName)
+        public static List<string> GetConfigFiles(this Project project)
+        {
+            var result = new List<string>();
+
+            var projectPath = project.Properties.Item("FullPath")?.Value.ToString();
+
+            if (string.IsNullOrEmpty(projectPath))
+            {
+                return result;
+            }
+
+            var file = Directory.GetFiles(projectPath, "efpt.config.json");
+            result.AddRange(file);
+
+            var files = Directory.GetFiles(projectPath, "efpt.*.config.json");
+            result.AddRange(files);
+
+            if (result.Count() == 0)
+            {
+                result.Add(Path.Combine(projectPath, "efpt.config.json"));
+            }
+            
+            return result.OrderBy(s => s).ToList();
+        }
+
+        public static string GetRenamingPath(this Project project)
+        {
+            var projectPath = project.Properties.Item("FullPath")?.Value.ToString();
+
+            if (string.IsNullOrEmpty(projectPath))
+            {
+                return null;
+            }
+
+            return Path.Combine(projectPath, "efpt.renaming.json");
+        }
+
+
+        public static async System.Threading.Tasks.Task<string> GetCspPropertyAsync(this Project project, string propertyName)
         {
             var unconfiguredProject = GetUnconfiguredProject(project);
-            var configuredProject = unconfiguredProject.GetSuggestedConfiguredProjectAsync().Result;
+            var configuredProject = await unconfiguredProject.GetSuggestedConfiguredProjectAsync();
             var properties = configuredProject.Services.ProjectPropertiesProvider.GetCommonProperties();
-            return properties.GetEvaluatedPropertyValueAsync(propertyName).Result;
+            return await properties.GetEvaluatedPropertyValueAsync(propertyName);
         }
 
         private static UnconfiguredProject GetUnconfiguredProject(EnvDTE.Project project)
@@ -79,6 +120,10 @@ namespace EFCorePowerTools.Extensions
             {
                 providerPackage = "Pomelo.EntityFrameworkCore.MySql";
             }
+            if (dbType == DatabaseType.Oracle)
+            {
+                providerPackage = "Oracle.EntityFrameworkCore";
+            }
 
             var vsProject = project.Object as VSProject;
             if (vsProject == null) return new Tuple<bool, string>(false, providerPackage);
@@ -92,25 +137,32 @@ namespace EFCorePowerTools.Extensions
             return new Tuple<bool, string>(false, providerPackage);
         }
 
-        public static Tuple<bool, string> ContainsEfCoreDesignReference(this Project project)
+        public static async System.Threading.Tasks.Task<Tuple<bool, string>> ContainsEfCoreDesignReferenceAsync(this Project project)
         {
             var designPackage = "Microsoft.EntityFrameworkCore.Design";
             var corePackage = "Microsoft.EntityFrameworkCore";
 
             bool hasDesign = false;
             string coreVersion = string.Empty;
+            var projectAssetsFile = await project.GetCspPropertyAsync("ProjectAssetsFile");
 
-            var vsProject = project.Object as VSProject;
-            if (vsProject == null) return new Tuple<bool, string>(false, null);
-            for (var i = 1; i < vsProject.References.Count + 1; i++)
+            if (projectAssetsFile != null && File.Exists(projectAssetsFile))
             {
-                if (vsProject.References.Item(i).Name.Equals(designPackage))
+                var lockFile = LockFileUtilities.GetLockFile(projectAssetsFile, NuGet.Common.NullLogger.Instance);
+
+                if (lockFile != null)
                 {
-                    hasDesign = true;
-                }
-                if (vsProject.References.Item(i).Name.Equals(corePackage))
-                {
-                    coreVersion = vsProject.References.Item(i).Version;
+                    foreach (var lib in lockFile.Libraries)
+                    {
+                        if (lib.Name.Equals(corePackage))
+                        {
+                            coreVersion = lib.Version.ToString();
+                        }
+                        if (lib.Name.Equals(designPackage))
+                        {
+                            hasDesign = true;
+                        }
+                    }
                 }
             }
 
@@ -119,17 +171,27 @@ namespace EFCorePowerTools.Extensions
 
         public static bool IsNetCore(this Project project)
         {
-            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v2.");
+            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v");
         }
 
-        public static bool IsNetCore21(this Project project)
+        public static bool IsNetCore30OrHigher(this Project project)
         {
-            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v2.1");
+            return IsNetCore30(project) || IsNetCore31(project) || IsNet50(project);
         }
 
-        public static bool IsNetCore22(this Project project)
+        private static bool IsNetCore30(this Project project)
         {
-            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v2.2");
+            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v3.0");
+        }
+
+        private static bool IsNetCore31(this Project project)
+        {
+            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v3.1");
+        }
+
+        private static bool IsNet50(this Project project)
+        {
+            return project.Properties.Item("TargetFrameworkMoniker").Value.ToString().Contains(".NETCoreApp,Version=v5.0");
         }
 
         private static string GetOutputPath(Project project)
@@ -152,6 +214,13 @@ namespace EFCorePowerTools.Extensions
 
             foreach (var item in result)
             {
+                if (item.Item1.IndexOfAny(Path.GetInvalidPathChars()) >= 0
+                    || item.Item1.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                {
+                    EnvDteHelper.ShowError("Invalid name: " + item.Item1);
+                    return list;
+                }
+
                 var filePath = Path.Combine(Path.GetTempPath(),
                     item.Item1 + extension);
 

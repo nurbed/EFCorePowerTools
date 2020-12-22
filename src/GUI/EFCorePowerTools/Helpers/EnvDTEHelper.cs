@@ -1,19 +1,18 @@
 ﻿using EFCorePowerTools;
-using EFCorePowerTools.Shared.Enums;
-using EFCorePowerTools.Shared.Models;
 using ErikEJ.SqlCeScripting;
+using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Data.Core;
 using Microsoft.VisualStudio.Data.Services;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
-using Npgsql;
+using ReverseEngineer20;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.Common;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using MySql.Data.MySqlClient;
 
 // ReSharper disable once CheckNamespace
 namespace ErikEJ.SqlCeToolbox.Helpers
@@ -25,15 +24,12 @@ namespace ErikEJ.SqlCeToolbox.Helpers
             // http://www.mztools.com/articles/2007/MZ2007018.aspx
             Dictionary<string, DatabaseInfo> databaseList = new Dictionary<string, DatabaseInfo>();
             var dataExplorerConnectionManager = package.GetService<IVsDataExplorerConnectionManager>();
-            Guid provider40 = new Guid(EFCorePowerTools.Shared.Resources.SqlCompact40Provider);
-            Guid provider40Private = new Guid(EFCorePowerTools.Shared.Resources.SqlCompact40PrivateProvider);
             Guid providerSqLite = new Guid(EFCorePowerTools.Shared.Resources.SQLiteProvider);
             Guid providerSqlitePrivate = new Guid(EFCorePowerTools.Shared.Resources.SQLitePrivateProvider);
             Guid providerNpgsql = new Guid(Resources.NpgsqlProvider);
             Guid providerMysql = new Guid(Resources.MysqlVSProvider);
+            Guid providerOracle = new Guid(Resources.OracleProvider);
 
-            bool isV40Installed = RepositoryHelper.IsV40Installed() &&
-                (DdexProviderIsInstalled(provider40) || DdexProviderIsInstalled(provider40Private));
             if (dataExplorerConnectionManager != null)
             {
                 foreach (var connection in dataExplorerConnectionManager.Connections.Values)
@@ -46,16 +42,12 @@ namespace ErikEJ.SqlCeToolbox.Helpers
                             Caption = connection.DisplayName,
                             FromServerExplorer = true,
                             DatabaseType = DatabaseType.SQLCE35,
-                            ConnectionString = sConnectionString
+                            ConnectionString = sConnectionString,
+                            DataConnection = connection.Connection,
                         };
+
                         var objProviderGuid = connection.Provider;
 
-                        if ((objProviderGuid == provider40 && isV40Installed ||
-                            objProviderGuid == provider40Private && isV40Installed)
-                            && !sConnectionString.Contains("Mobile Device"))
-                        {
-                            info.DatabaseType = DatabaseType.SQLCE40;
-                        }
                         if (objProviderGuid == providerSqLite
                             || objProviderGuid == providerSqlitePrivate)
                         {
@@ -71,6 +63,11 @@ namespace ErikEJ.SqlCeToolbox.Helpers
                         if (objProviderGuid == providerMysql)
                         {
                             info.DatabaseType = DatabaseType.Mysql;
+                        }
+
+                        if (objProviderGuid == providerOracle)
+                        {
+                            info.DatabaseType = DatabaseType.Oracle;
                         }
 
                         if (info.DatabaseType != DatabaseType.SQLCE35
@@ -122,14 +119,27 @@ namespace ErikEJ.SqlCeToolbox.Helpers
 
             var savedName = SaveDataConnection(package, dialog.EncryptedConnectionString, info.DatabaseType, new Guid(info.Size));
             info.Caption = savedName;
+            info.DataConnection = dialogResult;
             return info;
+        }
+
+        internal static string PromptForDacpac()
+        {
+            var ofd = new OpenFileDialog();
+            ofd.Filter = "SQL Server Database Project|*.dacpac";
+            ofd.CheckFileExists = true;
+            ofd.Multiselect = false;
+            ofd.ValidateNames = true;
+            ofd.Title = "Select .dacpac File";
+            if (ofd.ShowDialog() != DialogResult.OK) return null;
+            return ofd.FileName;
         }
 
         internal static string SaveDataConnection(EFCorePowerToolsPackage package, string encryptedConnectionString,
             DatabaseType dbType, Guid provider)
         {
             var dataExplorerConnectionManager = package.GetService<IVsDataExplorerConnectionManager>();
-            var savedName = GetFileName(DataProtection.DecryptString(encryptedConnectionString), dbType);
+            var savedName = GetSavedConnectionName(DataProtection.DecryptString(encryptedConnectionString), dbType);
             dataExplorerConnectionManager.AddConnection(savedName, provider, encryptedConnectionString, true);
             return savedName;
         }
@@ -147,33 +157,38 @@ namespace ErikEJ.SqlCeToolbox.Helpers
             {
                 providerInvariant = (string)dp.GetProperty("InvariantName");
                 dbType = DatabaseType.SQLCE35;
-                if (providerInvariant == "System.Data.SqlServerCe.4.0")
-                {
-                    dbType = DatabaseType.SQLCE40;
-                    providerGuid = EFCorePowerTools.Shared.Resources.SqlCompact40PrivateProvider;
-                }
+
                 if (providerInvariant == "System.Data.SQLite.EF6")
                 {
                     dbType = DatabaseType.SQLite;
                     providerGuid = EFCorePowerTools.Shared.Resources.SQLitePrivateProvider;
                 }
+
                 if (providerInvariant == "System.Data.SqlClient")
                 {
                     dbType = DatabaseType.SQLServer;
                     providerGuid = Resources.SqlServerDotNetProvider;
                 }
+
                 if (providerInvariant == "Npgsql")
                 {
                     dbType = DatabaseType.Npgsql;
                     providerGuid = Resources.NpgsqlProvider;
                 }
 
-                if (providerInvariant == "Mysql")
+                if (providerInvariant == "Oracle.ManagedDataAccess.Client")
+                {
+                    dbType = DatabaseType.Oracle;
+                    providerGuid = Resources.OracleProvider;
+                }
+
+                if (providerInvariant == "Mysql" || providerInvariant == "MySql.Data.MySqlClient")
                 {
                     dbType = DatabaseType.Mysql;
                     providerGuid = Resources.MysqlVSProvider;
                 }
             }
+
             return new DatabaseInfo
             {
                 DatabaseType = dbType,
@@ -183,120 +198,62 @@ namespace ErikEJ.SqlCeToolbox.Helpers
             };
         }
 
-        internal static string GetNpgsqlDatabaseName(string connectionString)
-        {
-            var pgBuilder = new NpgsqlConnectionStringBuilder(connectionString);
-            return pgBuilder.Database;
-        }
-
-        internal static List<TableInformationModel> GetNpgsqlTableNames(string connectionString)
-        {
-            var result = new List<TableInformationModel>();
-            using (var npgsqlConn = new NpgsqlConnection(connectionString))
-            {
-                npgsqlConn.Open();
-                var tablesDataTable = npgsqlConn.GetSchema("Tables");
-                foreach (DataRow row in tablesDataTable.Rows)
-                {
-                    var schema = row["table_schema"].ToString();
-                    if (schema != "pg_catalog"
-                        && schema != "information_schema")
-                    {
-                        // TODO: Check if the table has a primary key
-                        result.Add(new TableInformationModel(schema + "." + row["table_name"].ToString(), true));
-                    }
-                }
-            }
-
-            return result.OrderBy(l => l.Name).ToList();
-        }
-
-        internal static string GetMysqlDatabaseName(string connectionString)
-        {
-            var myBuilder = new MySqlConnectionStringBuilder(connectionString);
-            return myBuilder.Database;
-        }
-
-        internal static List<TableInformationModel> GetMysqlTableNames(string connectionString)
-        {
-            var result = new List<TableInformationModel>();
-            using (var mysqlConn = new MySqlConnection(connectionString))
-            {
-                mysqlConn.Open();
-
-                var tables = GetMysqlTables(mysqlConn, mysqlConn.Database);
-                string schema = mysqlConn.Database;
-                if (schema != "information_schema")
-                {
-                    foreach (string table in tables)
-                    {
-                        bool hasPrimaryKey = HasMysqlPrimaryKey(schema, table, mysqlConn);
-                        result.Add(new TableInformationModel(table, hasPrimaryKey));
-                    }
-                }
-            }
-
-            return result.OrderBy(l => l.Name).ToList();
-        }
-
-        // We could use Mysql.Data for this as MysqlConnector doesn't support GetSchema("Tables").
-        // I will just pluck the data we need for now.
-        private static List<string> GetMysqlTables(MySqlConnection mysqlConn, string schema)
-        {
-            List<string> tables = new List<string>();
-            string sql = $@"SHOW TABLE STATUS FROM `{schema}`";
-
-            MySqlCommand cmd = new MySqlCommand(sql, mysqlConn);
-            using (MySqlDataReader reader = cmd.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    tables.Add(reader.GetString(0));
-                }
-            }
-
-
-            return tables;
-        }
-
-        private static bool HasMysqlPrimaryKey(string schemaName, string tableName, MySqlConnection mysqlConn)
-        {
-            /**
-             * A Unique index can unexpectedly be shown as a primary key here:             *
-             * https://dev.mysql.com/doc/mysql-infoschema-excerpt/5.6/en/columns-table.html
-             * "A UNIQUE index may be displayed as PRI if it cannot contain NULL values and there is no PRIMARY KEY in the table.
-             * A UNIQUE index may display as MUL if several columns form a composite UNIQUE index; although the combination of
-             * the columns is unique, each column can still hold multiple occurrences of a given value."
-             */
-            MySqlCommand cmd = mysqlConn.CreateCommand();
-            cmd.CommandText = "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = @schema AND table_name = @table AND column_key = 'PRI') AS HasPrimaryKey";
-            cmd.Parameters.AddWithValue("@schema", schemaName);
-            cmd.Parameters.AddWithValue("@table", tableName);
-            string value = cmd.ExecuteScalar().ToString();
-
-            return value == "1";
-        }
-
-        private static string GetFilePath(string connectionString, DatabaseType dbType)
-        {
-            var helper = RepositoryHelper.CreateEngineHelper(dbType);
-            return helper.PathFromConnectionString(connectionString);
-        }
-
-        private static string GetFileName(string connectionString, DatabaseType dbType)
+        public static string GetSavedConnectionName(string connectionString, DatabaseType dbType)
         {
             if (dbType == DatabaseType.SQLServer)
             {
                 var helper = new SqlServerHelper();
                 return helper.PathFromConnectionString(connectionString);
             }
-            if (dbType == DatabaseType.Npgsql)
-                return GetNpgsqlDatabaseName(connectionString);
-            if (dbType == DatabaseType.Mysql)
-                return GetMysqlDatabaseName(connectionString);
 
-            var filePath = GetFilePath(connectionString, dbType);
-            return Path.GetFileName(filePath);
+            var builder = new DbConnectionStringBuilder();
+            builder.ConnectionString = connectionString;
+
+            var result = string.Empty;
+
+            if (builder.TryGetValue("Data Source", out object dataSource))
+            {
+                result += dataSource.ToString();
+            }
+
+            if (builder.TryGetValue("DataSource", out object dataSource2))
+            {
+                result +=  dataSource2.ToString();
+            }
+
+            if (builder.TryGetValue("Database", out object database))
+            {
+                result+=  "." + database.ToString();
+            }
+
+            return result;
+        }
+
+        public static string GetDatabaseName(string connectionString, DatabaseType dbType)
+        {
+            var builder = new DbConnectionStringBuilder();
+            builder.ConnectionString = connectionString;
+
+            if (builder.TryGetValue("Initial Catalog", out object catalog))
+            {
+                return catalog.ToString();
+            }
+
+            if (builder.TryGetValue("Database", out object database))
+            {
+                return database.ToString();
+            }
+
+            if (builder.TryGetValue("Data Source", out object dataSource))
+            {
+                return dataSource.ToString();
+            }
+
+            if (builder.TryGetValue("DataSource", out object dataSource2))
+            {
+                return dataSource2.ToString();
+            }
+            return dbType.ToString();
         }
 
         internal static bool IsSqLiteDbProviderInstalled()
@@ -310,6 +267,18 @@ namespace ErikEJ.SqlCeToolbox.Helpers
                 return false;
             }
             return true;
+        }
+
+        internal static string[] GetProjectFilesInSolution(EFCorePowerToolsPackage package)
+        {
+            IVsSolution sol = package.GetService<IVsSolution>();
+            uint numProjects;
+            ErrorHandler.ThrowOnFailure(sol.GetProjectFilesInSolution((uint)__VSGETPROJFILESFLAGS.GPFF_SKIPUNLOADEDPROJECTS, 0, null, out numProjects));
+            string[] projects = new string[numProjects];
+            ErrorHandler.ThrowOnFailure(sol.GetProjectFilesInSolution((uint)__VSGETPROJFILESFLAGS.GPFF_SKIPUNLOADEDPROJECTS, numProjects, projects, out numProjects));
+            //GetProjectFilesInSolution also returns solution folders, so we want to do some filtering
+            //things that don't exist on disk certainly can't be project files
+            return projects.Where(p => !string.IsNullOrEmpty(p) && File.Exists(p)).ToArray();
         }
 
         // <summary>

@@ -3,8 +3,14 @@ using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.EntityFrameworkCore.Design.Internal;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Internal;
+#if CORE50
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions;
+using Microsoft.EntityFrameworkCore.Metadata.Conventions.Infrastructure;
+#endif
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Design;
+using Microsoft.EntityFrameworkCore.Migrations.Internal;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using System;
@@ -78,8 +84,9 @@ namespace ReverseEngineer20
                     var dbContext = operations.CreateContext(type.Name);
                     result.Add(new Tuple<string, string>(type.Name, GetMigrationStatus(dbContext)));
                 }
-                catch (InvalidOperationException)
+                catch (InvalidOperationException ex)
                 {
+                    Console.Error.WriteLine(ex);
                     continue;
                 }
             }
@@ -97,11 +104,31 @@ namespace ReverseEngineer20
 
             var migrationsAssembly = context.GetService<IMigrationsAssembly>();
             var modelDiffer = context.GetService<IMigrationsModelDiffer>();
+#if CORE50
+            var dependencies = context.GetService<ProviderConventionSetBuilderDependencies>();
+            var relationalDependencies = context.GetService<RelationalConventionSetBuilderDependencies>();
 
+            var hasDifferences = false;
+
+            if (migrationsAssembly.ModelSnapshot != null)
+            {
+                var typeMappingConvention = new TypeMappingConvention(dependencies);
+                typeMappingConvention.ProcessModelFinalizing(((IConventionModel)migrationsAssembly.ModelSnapshot.Model).Builder, null);
+
+                var relationalModelConvention = new RelationalModelConvention(dependencies, relationalDependencies);
+                var sourceModel = relationalModelConvention.ProcessModelFinalized(migrationsAssembly.ModelSnapshot.Model);
+
+                hasDifferences = modelDiffer.HasDifferences(
+                     ((IMutableModel)sourceModel).FinalizeModel().GetRelationalModel(),
+                    context.Model.GetRelationalModel());
+            }
+
+            var pendingModelChanges = (!databaseExists || hasDifferences);
+#else
             var pendingModelChanges
                 = (!databaseExists || migrationsAssembly.ModelSnapshot != null)
                     && modelDiffer.HasDifferences(migrationsAssembly.ModelSnapshot?.Model, context.Model);
-
+#endif
             if (pendingModelChanges) return "Changes";
 
             var migrations = context.Database.GetMigrations().ToArray();
@@ -128,8 +155,11 @@ namespace ReverseEngineer20
             EnsureServices(services);
 
             var migrator = services.GetRequiredService<IMigrator>();
-
+#if CORE50
+            return migrator.GenerateScript(null, null, MigrationsSqlGenerationOptions.Idempotent);
+#else
             return migrator.GenerateScript(null, null, idempotent: true);
+#endif
         }
 
         private string ApplyMigrations(DbContext context)
@@ -192,7 +222,6 @@ namespace ReverseEngineer20
                 throw new ArgumentException("Unable to load project assembly");
             }
 
-            //TODO Use OperationHandler output!!
             var reporter = new OperationReporter(
                 new OperationReportHandler());
 
@@ -207,17 +236,10 @@ namespace ReverseEngineer20
                 throw new ArgumentException("Unable to load project assembly");
             }
 
-            //TODO Use OperationHandler output!!
             var reporter = new OperationReporter(
                 new OperationReportHandler());
 
-#if CORE21
-            return new DesignTimeServicesBuilder(assembly, reporter, Array.Empty<string>());
-#else
-#if CORE22
             return new DesignTimeServicesBuilder(assembly, assembly, reporter, Array.Empty<string>());
-#endif
-#endif
         }
 
         private Assembly Load(string assemblyPath)

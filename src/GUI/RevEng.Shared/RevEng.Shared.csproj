@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <SignAssembly>true</SignAssembly>
+    <AssemblyOriginatorKeyFile>Key.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\ErikEJ.EntityFrameworkCore.DgmlBuilder\DebugViewParser.cs" Link="ModelBuilder\DebugViewParser.cs" />
+    <Compile Include="..\ErikEJ.EntityFrameworkCore.DgmlBuilder\DebugViewParserResult.cs" Link="ModelBuilder\DebugViewParserResult.cs" />
+    <Compile Include="..\ErikEJ.EntityFrameworkCore.DgmlBuilder\DgmlBuilder.cs" Link="ModelBuilder\DgmlBuilder.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="ModelBuilder\" />
+  </ItemGroup>
+
+</Project>

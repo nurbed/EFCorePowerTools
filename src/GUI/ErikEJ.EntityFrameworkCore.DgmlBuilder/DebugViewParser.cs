@@ -240,13 +240,25 @@ namespace DgmlBuilder
                 
                 var name = parts[0];
 
-                var fieldStripped = parts[1].Remove(parts[1].Length - 1, 1).Remove(0, 1);
-                var typeStripped = parts[2].Remove(parts[2].Length - 1);
+                var noField = !parts[2].EndsWith(")");
 
-                var field =  System.Security.SecurityElement.Escape(fieldStripped);
+                var fieldStripped = parts[1].StartsWith("(")
+                    ? parts[1].Remove(parts[1].Length - 1, 1).Remove(0, 1)
+                    : parts[1];
+                var typeStripped = parts[2].EndsWith(")")
+                    ? parts[2].Remove(parts[2].Length - 1)
+                    : parts[1];
+                
+                var field = System.Security.SecurityElement.Escape(fieldStripped);
                 var type = System.Security.SecurityElement.Escape(typeStripped);
 
-                parts.RemoveRange(0, 3);
+                if (noField)
+                {
+                    type = field;
+                    field = string.Empty;
+                }
+
+                parts.RemoveRange(0, 2);
 
                 var dependent = string.Empty;
                 var inverse = string.Empty;
@@ -305,9 +317,9 @@ namespace DgmlBuilder
                         continue;
                     }
 
-                    var annotation = GetFkAnnotations(i, foreignKeysFragments.ToArray());
-
                     if (trim.StartsWith("Relational:")) continue;
+
+                    var annotation = GetFkAnnotations(i, foreignKeysFragments.ToArray());
 
                     //Multi key FKs!
                     trim = trim.Replace("', '", ",");
@@ -372,6 +384,7 @@ namespace DgmlBuilder
 
                 if (debugViewLines[x].StartsWith("    Annotations:")
                     || debugViewLines[x].StartsWith("Annotations:")
+                    || trim.StartsWith("Indexes:")
                     || trim.StartsWith("EntityType:"))
                 {
                     break;
@@ -426,7 +439,7 @@ namespace DgmlBuilder
                 {
                     break;
                 }
-                if (inTheMix && !trim.StartsWith("Annotations:")) values.Add(trim);
+                if (inTheMix && !trim.StartsWith("Annotations:")) values.Add(System.Security.SecurityElement.Escape(trim));
             }
 
             return values;
@@ -441,7 +454,7 @@ namespace DgmlBuilder
             {
                 while (x++ < maxLength && debugViewLines[x].StartsWith("        "))
                 {
-                    annotations.Add(debugViewLines[x].Trim());
+                    annotations.Add(System.Security.SecurityElement.Escape(debugViewLines[x].Trim()));
                 }
             }
 
@@ -457,7 +470,7 @@ namespace DgmlBuilder
             {
                 if (debugViewLines[x].StartsWith("          "))
                 {
-                    annotations.Add(debugViewLines[x].Trim());
+                    annotations.Add(System.Security.SecurityElement.Escape(debugViewLines[x].Trim()));
                 }
 
                 if (debugViewLines[x].Substring(7, 1) != " ")

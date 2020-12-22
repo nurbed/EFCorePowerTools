@@ -1,0 +1,71 @@
+{
+   "ConnectionString": "Data Source=.\\SQLEXPRESS;Initial Catalog=Northwind;Integrated Security=True",
+   "ContextClassName": "NorthwindContext",
+   "CustomReplacers": null,
+   "Dacpac": null,
+   "DatabaseType": 3,
+   "DefaultDacpacSchema": null,
+   "DoNotCombineNamespace": false,
+   "IdReplace": false,
+   "IncludeConnectionString": true,
+   "OutputPath": "Models",
+   "OutputContextPath": null,
+   "ModelNamespace": "Modelos",
+   "ContextNamespace": "Context",
+   "ProjectPath": "C:\\Temp\\Test\\ConsoleApp1",
+   "ProjectRootNamespace": "ConsoleApp2",
+   "SelectedHandlebarsLanguage": 0,
+   "SelectedToBeGenerated": 0,
+   "Tables": [
+      {
+         "HasPrimaryKey": true,
+         "Name": "dbo.Shippers"
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "dbo.ClientsLogs"
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "dbo.Domains"
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "dbo.Crazy"
+      },
+	  {
+         "HasPrimaryKey": false,
+         "Name": "dbo.BlogsView"
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "dbo.Forests"
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "[dbo].[OutputFail]",
+         "ObjectType": 1
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "[dbo].[TestMethodOutputNoResult]",
+         "ObjectType": 1
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "[dbo].[Ten Most Expensive Products]",
+         "ObjectType": 1
+      },
+      {
+         "HasPrimaryKey": true,
+         "Name": "[dbo].[Spaces]",
+         "ObjectType": 1
+      }
+   ],
+   "UseDatabaseNames": false,
+   "UseFluentApiOnly": true,
+   "UseHandleBars": false,
+   "UseInflector": true,
+   "UseLegacyPluralizer": false,
+   "UseStoredProcedures": true
+}

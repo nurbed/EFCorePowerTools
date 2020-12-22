@@ -4,8 +4,8 @@
     using EnvDTE80;
     using ErikEJ.SqlCeToolbox.Helpers;
     using Microsoft.VisualStudio.Shell.Interop;
+    using ReverseEngineer20;
     using Shared.DAL;
-    using Shared.Enums;
     using Shared.Models;
 
     public class VisualStudioAccess : IVisualStudioAccess
@@ -31,6 +31,21 @@
                 ConnectionName = info.Caption,
                 ConnectionString = info.ConnectionString,
                 DatabaseType = info.DatabaseType
+            };
+        }
+
+        DatabaseDefinitionModel IVisualStudioAccess.PromptForNewDatabaseDefinition()
+        {
+            var fileName = EnvDteHelper.PromptForDacpac();
+
+            if (string.IsNullOrEmpty(fileName))
+            {
+                return null;
+            }
+
+            return new DatabaseDefinitionModel
+            {
+                FilePath = fileName,
             };
         }
 

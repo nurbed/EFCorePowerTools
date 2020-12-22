@@ -19,7 +19,6 @@
         private readonly IExtensionVersionService _extensionVersionService;
         private readonly IInstalledComponentsService _installedComponentsService;
         private readonly IOperatingSystemAccess _operatingSystemAccess;
-        private readonly IVisualStudioAccess _visualStudioAccess;
         private readonly IMessenger _messenger;
 
         private string _version;
@@ -66,7 +65,6 @@
             _extensionVersionService = extensionVersionService ?? throw new ArgumentNullException(nameof(extensionVersionService));
             _installedComponentsService = installedComponentsService ?? throw new ArgumentNullException(nameof(installedComponentsService));
             _operatingSystemAccess = operatingSystemAccess ?? throw new ArgumentNullException(nameof(operatingSystemAccess));
-            _visualStudioAccess = visualStudioAccess ?? throw new ArgumentNullException(nameof(visualStudioAccess));
             _messenger = messenger ?? throw new ArgumentNullException(nameof(messenger));
 
             _aboutExtensionModel.PropertyChanged += AboutExtensionModelOnPropertyChanged;
@@ -85,11 +83,7 @@
             else
                 FormatVersion();
 
-            if (_aboutExtensionModel.SqlServerCompact40GacVersion == null
-                || _aboutExtensionModel.SqlServerCompact40DbProviderInstalled == null
-                || _aboutExtensionModel.SqlServerCompact40DdexProviderInstalled == null
-                || _aboutExtensionModel.SqlServerCompact40SimpleDdexProviderInstalled == null
-                || _aboutExtensionModel.SqLiteAdoNetProviderVersion == null
+            if (_aboutExtensionModel.SqLiteAdoNetProviderVersion == null
                 || _aboutExtensionModel.SqLiteEf6DbProviderInstalled == null
                 || _aboutExtensionModel.SqLiteDdexProviderInstalled == null
                 || _aboutExtensionModel.SqlLiteSimpleDdexProviderInstalled == null)
@@ -139,23 +133,6 @@
         {
             var sb = new StringBuilder();
 
-            sb.Append("SQL Server Compact 4.0 in GAC - ");
-            sb.AppendLine(_aboutExtensionModel.SqlServerCompact40GacVersion == null ? "No" : $"Yes - {_aboutExtensionModel.SqlServerCompact40GacVersion}");
-
-            sb.Append("SQL Server Compact 4.0 DbProvider - ");
-            sb.AppendLine(_aboutExtensionModel.SqlServerCompact40DbProviderInstalled == true ? "Yes" : "No");
-
-            sb.AppendLine();
-
-            sb.Append("SQL Server Compact 4.0 DDEX provider - ");
-            sb.AppendLine(_aboutExtensionModel.SqlServerCompact40DdexProviderInstalled == true ? "Yes" : "No");
-
-            sb.Append("SQL Server Compact 4.0 Simple DDEX provider - ");
-            sb.AppendLine(_aboutExtensionModel.SqlServerCompact40SimpleDdexProviderInstalled == true ? "Yes" : "No");
-
-            sb.AppendLine();
-            sb.AppendLine();
-
             sb.Append("SQLite ADO.NET Provider included: ");
             sb.AppendLine(_aboutExtensionModel.SqLiteAdoNetProviderVersion == null ? "No" : _aboutExtensionModel.SqLiteAdoNetProviderVersion.ToString());
 
@@ -184,10 +161,6 @@
                 case nameof(AboutExtensionModel.ExtensionVersion):
                     FormatVersion();
                     break;
-                case nameof(AboutExtensionModel.SqlServerCompact40GacVersion):
-                case nameof(AboutExtensionModel.SqlServerCompact40DbProviderInstalled):
-                case nameof(AboutExtensionModel.SqlServerCompact40DdexProviderInstalled):
-                case nameof(AboutExtensionModel.SqlServerCompact40SimpleDdexProviderInstalled):
                 case nameof(AboutExtensionModel.SqLiteEf6DbProviderInstalled):
                 case nameof(AboutExtensionModel.SqLiteDdexProviderInstalled):
                 case nameof(AboutExtensionModel.SqlLiteSimpleDdexProviderInstalled):

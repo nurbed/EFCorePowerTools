@@ -10,13 +10,13 @@
     {
         event EventHandler<CloseRequestedEventArgs> CloseRequested;
 
-        ICommand LoadedCommand { get; }
         ICommand OkCommand { get; }
         ICommand CancelCommand { get; }
 
         ModelingOptionsModel Model { get; }
 
         IReadOnlyList<string> GenerationModeList { get; }
+        IReadOnlyList<string> HandlebarsLanguageList { get; }
         string Title { get; }
         bool MayIncludeConnectionString { get; }
 

@@ -1,4 +1,8 @@
-﻿using EFCorePowerTools.Extensions;
+﻿using EFCorePowerTools.Contracts.Views;
+using EFCorePowerTools.Extensions;
+using EFCorePowerTools.Handlers.ReverseEngineer;
+using EFCorePowerTools.Helpers;
+using EFCorePowerTools.Shared.Models;
 using EnvDTE;
 using ErikEJ.SqlCeToolbox.Helpers;
 using ReverseEngineer20;
@@ -9,30 +13,28 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using ReverseEngineer20.ReverseEngineer;
+using Microsoft.VisualStudio.Data.Services;
+using System.Threading.Tasks;
 
 namespace EFCorePowerTools.Handlers
 {
-    using Contracts.Views;
-    using Dialogs;
-    using ReverseEngineer20.ReverseEngineer;
-    using Shared.Enums;
-    using Shared.Models;
-
     internal class ReverseEngineerHandler
     {
         private readonly EFCorePowerToolsPackage _package;
+        private readonly ReverseEngineerHelper reverseEngineerHelper;
 
         public ReverseEngineerHandler(EFCorePowerToolsPackage package)
         {
             _package = package;
+            reverseEngineerHelper = new ReverseEngineerHelper();
         }
 
-        public async void ReverseEngineerCodeFirst(Project project)
+        public async Task ReverseEngineerCodeFirstAsync(Project project)
         {
             try
             {
                 var dteH = new EnvDteHelper();
-                var revEng = new EfCoreReverseEngineer();
                 string dacpacSchema = null;
 
                 if (_package.Dte2.Mode == vsIDEMode.vsIDEModeDebug)
@@ -41,13 +43,29 @@ namespace EFCorePowerTools.Handlers
                     return;
                 }
 
-                var startTime = DateTime.Now;
-                var projectPath = project.Properties.Item("FullPath").Value.ToString();
-                var optionsPath = Path.Combine(projectPath, "efpt.config.json");
-                var renamingPath = Path.Combine(projectPath, "efpt.renaming.json");
+                var projectPath = project.Properties.Item("FullPath")?.Value.ToString();
+                var optionsPaths = project.GetConfigFiles();
+                var optionsPath = optionsPaths.First();
+                var renamingPath = project.GetRenamingPath();
+
+                if (optionsPaths.Count > 1)
+                {
+                    var pcd = _package.GetView<IPickConfigDialog>();
+                    pcd.PublishConfigurations(optionsPaths.Select(m => new ConfigModel
+                    {
+                        ConfigPath = m,
+                    }));
+
+                    var pickConfigResult = pcd.ShowAndAwaitUserResponse(true);
+                    if (!pickConfigResult.ClosedByOK)
+                        return;
+
+                    optionsPath = pickConfigResult.Payload.ConfigPath;
+                }
 
                 var databaseList = EnvDteHelper.GetDataConnections(_package);
-                var dacpacList = _package.Dte2.DTE.GetDacpacFilesInActiveSolution();
+                var dacpacList = _package.Dte2.DTE.GetDacpacFilesInActiveSolution(EnvDteHelper.GetProjectFilesInSolution(_package));
+                var options = ReverseEngineerOptionsExtensions.TryRead(optionsPath);
 
                 var psd = _package.GetView<IPickServerDatabaseDialog>();
 
@@ -73,7 +91,11 @@ namespace EFCorePowerTools.Handlers
                 if (!pickDataSourceResult.ClosedByOK)
                     return;
 
-                _package.Dte2.StatusBar.Text = "Loading schema information...";
+                var useEFCore5 = pickDataSourceResult.Payload.IncludeViews;
+                var filterSchemas = pickDataSourceResult.Payload.FilterSchemas;
+                var schemas = filterSchemas ? pickDataSourceResult.Payload.Schemas : null;
+
+                _package.Dte2.StatusBar.Text = "Getting ready to connect...";
 
                 // Reload the database list, in case the user has added a new database in the dialog
                 databaseList = EnvDteHelper.GetDataConnections(_package);
@@ -89,8 +111,8 @@ namespace EFCorePowerTools.Handlers
 
                 if (!string.IsNullOrEmpty(dacpacPath))
                 {
-                    dbInfo.DatabaseType = DatabaseType.SQLServer;
-                    dbInfo.ConnectionString = "Data Source=.;Initial Catalog=" + Path.GetFileNameWithoutExtension(dacpacPath);
+                    dbInfo.DatabaseType = DatabaseType.SQLServerDacpac;
+                    dbInfo.ConnectionString = $"Data Source=(local);Initial Catalog={Path.GetFileNameWithoutExtension(dacpacPath)};Integrated Security=true;";
                     dacpacPath = _package.Dte2.DTE.BuildSqlProj(dacpacPath);
                     if (string.IsNullOrEmpty(dacpacPath))
                     {
@@ -99,51 +121,53 @@ namespace EFCorePowerTools.Handlers
                     }
                 }
 
-                if (dbInfo.DatabaseType == DatabaseType.SQLCE35)
+                if (dbInfo.DatabaseType == DatabaseType.SQLCE35 
+                    || dbInfo.DatabaseType == DatabaseType.SQLCE40
+                    || dbInfo.DatabaseType == DatabaseType.Undefined)
                 {
                     EnvDteHelper.ShowError($"Unsupported provider: {dbInfo.ServerVersion}");
                     return;
                 }
 
-                var options = ReverseEngineerOptionsExtensions.TryRead(optionsPath);
+                //TODO Enable when Oracle EF Core 5 provider is released
+                if (useEFCore5 && (dbInfo.DatabaseType == DatabaseType.Oracle))
+                {
+                    EnvDteHelper.ShowError($"Unsupported provider with EF Core 5.0: {dbInfo.DatabaseType}");
+                    return;
+                }
+                
+                _package.Dte2.StatusBar.Text = "Loading database objects...";
 
                 var predefinedTables = !string.IsNullOrEmpty(dacpacPath)
-                                           ? revEng.GetDacpacTables(dacpacPath)
-                                           : GetTablesFromRepository(dbInfo);
+                                           ? await GetDacpacTablesAsync(dacpacPath, useEFCore5)
+                                           : await GetTablesAsync(dbInfo, useEFCore5, schemas);
 
-                var preselectedTables = new List<TableInformationModel>();
+                var preselectedTables = new List<SerializationTableModel>();
                 if (options != null)
                 {
                     dacpacSchema = options.DefaultDacpacSchema;
                     if (options.Tables.Count > 0)
                     {
-                        preselectedTables.AddRange(options.Tables);
+                        var normalizedTables = reverseEngineerHelper.NormalizeTables(options.Tables, dbInfo.DatabaseType == DatabaseType.SQLServer);
+                        preselectedTables.AddRange(normalizedTables);
                     }
                 }
 
+                var namingOptionsAndPath = CustomNameOptionsExtensions.TryRead(renamingPath, optionsPath);
+
+                _package.Dte2.StatusBar.Clear();
+
                 var ptd = _package.GetView<IPickTablesDialog>()
-                                  .AddTables(predefinedTables)
+                                  .AddTables(predefinedTables, namingOptionsAndPath.Item1)
                                   .PreselectTables(preselectedTables);
-                
-                var customNameOptions = CustomNameOptionsExtensions.TryRead(renamingPath);
 
                 var pickTablesResult = ptd.ShowAndAwaitUserResponse(true);
                 if (!pickTablesResult.ClosedByOK) return;
 
-                var classBasis = string.Empty;
-                if (dbInfo.DatabaseType == DatabaseType.Npgsql)
-                {
-                    classBasis = EnvDteHelper.GetNpgsqlDatabaseName(dbInfo.ConnectionString);
-                }
-                else if (dbInfo.DatabaseType == DatabaseType.Mysql)
-                {
-                    classBasis = EnvDteHelper.GetMysqlDatabaseName(dbInfo.ConnectionString);
-                }
-                else
-                {
-                    classBasis = RepositoryHelper.GetClassBasis(dbInfo.ConnectionString, dbInfo.DatabaseType);
-                }
-                var model = revEng.GenerateClassName(classBasis) + "Context";
+                _package.Dte2.StatusBar.Text = "Loading options...";
+
+                var classBasis = EnvDteHelper.GetDatabaseName(dbInfo.ConnectionString, dbInfo.DatabaseType);
+                var model = reverseEngineerHelper.GenerateClassName(classBasis) + "Context";
                 var packageResult = project.ContainsEfCoreReference(dbInfo.DatabaseType);
 
                 var presets = new ModelingOptionsModel
@@ -159,19 +183,28 @@ namespace EFCorePowerTools.Handlers
                     presets.UseDataAnnotations = !options.UseFluentApiOnly;
                     presets.UseDatabaseNames = options.UseDatabaseNames;
                     presets.UsePluralizer = options.UseInflector;
-                    presets.UseHandelbars = options.UseHandleBars;
-                    presets.ReplaceId = options.IdReplace;
+                    presets.UseDbContextSplitting = options.UseDbContextSplitting;
+                    presets.UseHandlebars = options.UseHandleBars;
+                    presets.SelectedHandlebarsLanguage = options.SelectedHandlebarsLanguage;
                     presets.IncludeConnectionString = options.IncludeConnectionString;
                     presets.ModelName = options.ContextClassName;
                     presets.Namespace = options.ProjectRootNamespace;
                     presets.OutputPath = options.OutputPath;
-                    presets.SelectedTobeGenerated = options.SelectedToBeGenerated;
+                    presets.OutputContextPath = options.OutputContextPath;
+                    presets.ModelNamespace = options.ModelNamespace;
+                    presets.ContextNamespace = options.ContextNamespace;
+                    presets.SelectedToBeGenerated = options.SelectedToBeGenerated;
+                    presets.DacpacPath = options.Dacpac;
+                    presets.UseEf6Pluralizer = options.UseLegacyPluralizer;
+                    presets.MapSpatialTypes = options.UseSpatial;
+                    presets.MapNodaTimeTypes = options.UseNodaTime;
+                    presets.UseBoolPropertiesWithoutDefaultSql = options.UseBoolPropertiesWithoutDefaultSql;
                 }
 
                 var modelDialog = _package.GetView<IModelingOptionsDialog>()
                                           .ApplyPresets(presets);
 
-                _package.Dte2.StatusBar.Text = "Getting options...";
+                _package.Dte2.StatusBar.Clear();
 
                 var modelingOptionsResult = modelDialog.ShowAndAwaitUserResponse(true);
                 if (!modelingOptionsResult.ClosedByOK) return;
@@ -181,58 +214,99 @@ namespace EFCorePowerTools.Handlers
                     UseFluentApiOnly = !modelingOptionsResult.Payload.UseDataAnnotations,
                     ConnectionString = dbInfo.ConnectionString,
                     ContextClassName = modelingOptionsResult.Payload.ModelName,
-                    DatabaseType = (ReverseEngineer20.DatabaseType)dbInfo.DatabaseType,
+                    DatabaseType = dbInfo.DatabaseType,
                     ProjectPath = projectPath,
                     OutputPath = modelingOptionsResult.Payload.OutputPath,
+                    OutputContextPath = modelingOptionsResult.Payload.OutputContextPath,
+                    ContextNamespace = modelingOptionsResult.Payload.ContextNamespace,
+                    ModelNamespace = modelingOptionsResult.Payload.ModelNamespace,
                     ProjectRootNamespace = modelingOptionsResult.Payload.Namespace,
                     UseDatabaseNames = modelingOptionsResult.Payload.UseDatabaseNames,
                     UseInflector = modelingOptionsResult.Payload.UsePluralizer,
-                    IdReplace = modelingOptionsResult.Payload.ReplaceId,
-                    UseHandleBars = modelingOptionsResult.Payload.UseHandelbars,
+                    UseLegacyPluralizer = modelingOptionsResult.Payload.UseEf6Pluralizer,
+                    UseSpatial = modelingOptionsResult.Payload.MapSpatialTypes,
+                    UseNodaTime = modelingOptionsResult.Payload.MapNodaTimeTypes,
+                    UseDbContextSplitting = modelingOptionsResult.Payload.UseDbContextSplitting,
+                    UseHandleBars = modelingOptionsResult.Payload.UseHandlebars,
+                    SelectedHandlebarsLanguage = modelingOptionsResult.Payload.SelectedHandlebarsLanguage,
                     IncludeConnectionString = modelingOptionsResult.Payload.IncludeConnectionString,
-                    SelectedToBeGenerated = modelingOptionsResult.Payload.SelectedTobeGenerated,
+                    SelectedToBeGenerated = modelingOptionsResult.Payload.SelectedToBeGenerated,
+                    UseBoolPropertiesWithoutDefaultSql = modelingOptionsResult.Payload.UseBoolPropertiesWithoutDefaultSql,
                     Dacpac = dacpacPath,
                     DefaultDacpacSchema = dacpacSchema,
-                    Tables = pickTablesResult.Payload.ToList(),
-                    CustomReplacers = customNameOptions,
-                    IgnoredColumns = new List<string>()
+                    Tables = pickTablesResult.Payload.Objects.ToList(),
+                    CustomReplacers = pickTablesResult.Payload.CustomReplacers.ToList(),
+                    FilterSchemas = filterSchemas,
+                    Schemas = schemas?.ToList(),
                 };
 
-                _package.Dte2.StatusBar.Text = "Generating code...";
+                if (options.DatabaseType == DatabaseType.SQLServer
+                    && string.IsNullOrEmpty(options.Dacpac))
+                {
+                    var rightsAndVersion = reverseEngineerHelper.HasSqlServerViewDefinitionRightsAndVersion(options.ConnectionString);
+
+                    if (rightsAndVersion.Item1 == false)
+                    {
+                        EnvDteHelper.ShowMessage("The SQL Server user does not have 'VIEW DEFINITION' rights, default constraints may not be available.");
+                    }
+
+                    if (rightsAndVersion.Item2.Major < 11)
+                    {
+                        EnvDteHelper.ShowMessage($"SQL Server version {rightsAndVersion.Item2} may not be supported.");
+                    }
+                }
 
                 var tfm = project.Properties.Item("TargetFrameworkMoniker").Value.ToString();
-                bool isNetStandard = tfm.Contains(".NETStandard,Version=v2.0");
+                bool isNetStandard = tfm.Contains(".NETStandard,Version=v2.");
 
-                if (modelingOptionsResult.Payload.UseHandelbars)
+                if (modelingOptionsResult.Payload.UseHandlebars)
                 {
-                    var dropped = (DropTemplates(projectPath));
+                    var dropped = (DropTemplates(projectPath, useEFCore5));
                     if (dropped && !project.IsNetCore() && !isNetStandard)
                     {
                         project.ProjectItems.AddFromDirectory(Path.Combine(projectPath, "CodeTemplates"));
                     }
                 }
 
-                var revEngResult = revEng.GenerateFiles(options);
+                var startTime = DateTime.Now;
 
-                if (modelingOptionsResult.Payload.SelectedTobeGenerated == 0 || modelingOptionsResult.Payload.SelectedTobeGenerated == 2)
+                _package.Dte2.StatusBar.Text = "Generating code...";
+
+                var revEngResult = EfRevEngLauncher.LaunchExternalRunner(options, useEFCore5);
+
+                if (modelingOptionsResult.Payload.SelectedToBeGenerated == 0 || modelingOptionsResult.Payload.SelectedToBeGenerated == 2)
                 {
                     foreach (var filePath in revEngResult.EntityTypeFilePaths)
                     {
-                        project.ProjectItems.AddFromFile(filePath);
+                        if (!project.IsNetCore() && !isNetStandard)
+                        {
+                            project.ProjectItems.AddFromFile(filePath);
+                        }
                     }
-                    if (modelingOptionsResult.Payload.SelectedTobeGenerated == 2)
+                    if (modelingOptionsResult.Payload.SelectedToBeGenerated == 2)
                     {
                         if (File.Exists(revEngResult.ContextFilePath)) File.Delete(revEngResult.ContextFilePath);
+                        foreach (var filePath in revEngResult.ContextConfigurationFilePaths)
+                        {
+                            if (File.Exists(filePath)) File.Delete(filePath);
+                        }
                     }
                 }
-                if (modelingOptionsResult.Payload.SelectedTobeGenerated == 0 || modelingOptionsResult.Payload.SelectedTobeGenerated == 1)
+
+                if (modelingOptionsResult.Payload.SelectedToBeGenerated == 0 || modelingOptionsResult.Payload.SelectedToBeGenerated == 1)
                 {
-                    project.ProjectItems.AddFromFile(revEngResult.ContextFilePath);
                     if (!project.IsNetCore() && !isNetStandard)
                     {
-                        _package.Dte2.ItemOperations.OpenFile(revEngResult.ContextFilePath);
+                        foreach (var filePath in revEngResult.ContextConfigurationFilePaths)
+                        {
+                            project.ProjectItems.AddFromFile(filePath);
+                        }
+                        project.ProjectItems.AddFromFile(revEngResult.ContextFilePath);
                     }
-                    if (modelingOptionsResult.Payload.SelectedTobeGenerated == 1)
+
+                    _package.Dte2.ItemOperations.OpenFile(revEngResult.ContextFilePath);
+
+                    if (modelingOptionsResult.Payload.SelectedToBeGenerated == 1)
                     {
                         foreach (var filePath in revEngResult.EntityTypeFilePaths)
                         {
@@ -241,16 +315,18 @@ namespace EFCorePowerTools.Handlers
                     }
                 }
 
+                var duration = DateTime.Now - startTime;
+
                 var missingProviderPackage = packageResult.Item1 ? null : packageResult.Item2;
-                if (modelingOptionsResult.Payload.InstallNuGetPackage || modelingOptionsResult.Payload.SelectedTobeGenerated == 2)
+                if (modelingOptionsResult.Payload.InstallNuGetPackage || modelingOptionsResult.Payload.SelectedToBeGenerated == 2)
                 {
                     missingProviderPackage = null;
                 }
 
                 _package.Dte2.StatusBar.Text = "Reporting result...";
-                var errors = ReportRevEngErrors(revEngResult, missingProviderPackage);
+                var errors = reverseEngineerHelper.ReportRevEngErrors(revEngResult, missingProviderPackage);
 
-                SaveOptions(project, optionsPath, options);
+                SaveOptions(project, optionsPath, options, new Tuple<List<Schema>, string>(pickTablesResult.Payload.CustomReplacers.ToList(), namingOptionsAndPath.Item2));
 
                 if (modelingOptionsResult.Payload.InstallNuGetPackage)
                 {
@@ -258,7 +334,7 @@ namespace EFCorePowerTools.Handlers
                     var nuGetHelper = new NuGetHelper();
                     await nuGetHelper.InstallPackageAsync(packageResult.Item2, project);
                 }
-                var duration = DateTime.Now - startTime;
+
                 _package.Dte2.StatusBar.Text = $"Reverse engineer completed in {duration:h\\:mm\\:ss}";
 
                 EnvDteHelper.ShowMessage(errors);
@@ -286,81 +362,54 @@ namespace EFCorePowerTools.Handlers
             }
         }
 
-        private List<TableInformationModel> GetTablesFromRepository(DatabaseInfo dbInfo)
-        {
-            if (dbInfo.DatabaseType == DatabaseType.Npgsql)
-            {
-                return EnvDteHelper.GetNpgsqlTableNames(dbInfo.ConnectionString);
-            }
-
-            if (dbInfo.DatabaseType == DatabaseType.Mysql)
-            {
-                return EnvDteHelper.GetMysqlTableNames(dbInfo.ConnectionString);
-            }
-
-            using (var repository = RepositoryHelper.CreateRepository(dbInfo))
-            {
-                var allPks = repository.GetAllPrimaryKeys();
-                var tableList = repository.GetAllTableNamesForExclusion();
-                var tables = new List<TableInformationModel>();
-
-                foreach (var table in tableList)
-                {
-                    var hasPrimaryKey = allPks.Any(m => m.TableName == table);
-                    tables.Add(new TableInformationModel(table, hasPrimaryKey));
-                }
-                return tables;
-            }
-        }
-
-        private void SaveOptions(Project project, string optionsPath, ReverseEngineerOptions options)
+        private void SaveOptions(Project project, string optionsPath, ReverseEngineerOptions options, Tuple<List<Schema>, string> renamingOptions)
         {
             if (!File.Exists(optionsPath + ".ignore"))
             {
                 File.WriteAllText(optionsPath, options.Write(), Encoding.UTF8);
                 project.ProjectItems.AddFromFile(optionsPath);
             }
+
+            if (renamingOptions.Item1 != null && !File.Exists(renamingOptions.Item2 + ".ignore") && renamingOptions.Item1.Count() > 0)
+            {
+                File.WriteAllText(renamingOptions.Item2, CustomNameOptionsExtensions.Write(renamingOptions.Item1), Encoding.UTF8);
+                project.ProjectItems.AddFromFile(renamingOptions.Item2);
+            }
         }
 
-        private string ReportRevEngErrors(EfCoreReverseEngineerResult revEngResult, string missingProviderPackage)
+        private bool DropTemplates(string projectPath, bool useEFCore5)
         {
-            var errors = new StringBuilder();
-            if (revEngResult.EntityErrors.Count == 0)
-            {
-                errors.Append("Model generated successfully." + Environment.NewLine);
-            }
-            else
-            {
-                errors.Append("Please check the output window for errors" + Environment.NewLine);
-            }
+            var zipName = useEFCore5 ? "CodeTemplates501.zip" : "CodeTemplates.zip";
 
-            if (revEngResult.EntityWarnings.Count > 0)
-            {
-                errors.Append("Please check the output window for warnings" + Environment.NewLine);
-            }
-
-            if (!string.IsNullOrEmpty(missingProviderPackage))
-            {
-                errors.AppendLine();
-                errors.AppendFormat("The \"{0}\" NuGet package was not found in the project - it must be installed in order to build.", missingProviderPackage);
-            }
-
-            return errors.ToString();
-        }
-
-        private bool DropTemplates(string projectPath)
-        {
             var toDir = Path.Combine(projectPath, "CodeTemplates");
             var fromDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
             if (!Directory.Exists(toDir))
             {
                 Directory.CreateDirectory(toDir);
-                ZipFile.ExtractToDirectory(Path.Combine(fromDir, "CodeTemplates.zip"), toDir);
+                ZipFile.ExtractToDirectory(Path.Combine(fromDir, zipName), toDir);
                 return true;
             }
 
             return false;
+        }
+
+        private async Task<List<TableModel>> GetDacpacTablesAsync(string dacpacPath, bool useEFCore5)
+        {
+            var builder = new TableListBuilder(dacpacPath, DatabaseType.SQLServerDacpac, null);
+            return await Task.Run(() => builder.GetTableDefinitions(useEFCore5));
+        }
+
+        private async Task<List<TableModel>> GetTablesAsync(DatabaseInfo dbInfo, bool useEFCore5, SchemaInfo[] schemas)
+        {
+            if (dbInfo.DataConnection != null)
+            {
+                dbInfo.DataConnection.Open();
+                dbInfo.ConnectionString = DataProtection.DecryptString(dbInfo.DataConnection.EncryptedConnectionString);
+            }
+
+            var builder = new TableListBuilder(dbInfo.ConnectionString, dbInfo.DatabaseType, schemas);
+            return await Task.Run(() => builder.GetTableDefinitions(useEFCore5));
         }
     }
 }

@@ -37,9 +37,15 @@ namespace ReverseEngineer20
             foreach (var type in types)
             {
                 var dbContext = operations.CreateContext(type.Name);
-                result.Add(generateDdl
-                    ? new Tuple<string, string>(type.Name, GenerateCreateScript(dbContext))
-                    : new Tuple<string, string>(type.Name, dbContext.Model.AsModel().DebugView.View));
+
+                var generated = generateDdl
+                    ? GenerateCreateScript(dbContext)
+#if CORE50
+                    : dbContext.Model.AsModel().DebugView.LongView;
+#else
+                    : dbContext.Model.AsModel().DebugView.View;
+#endif
+                result.Add(new Tuple<string, string>(type.Name, generated));
             }
 
             return result;
@@ -53,7 +59,11 @@ namespace ReverseEngineer20
             var generator = database.GetService<IMigrationsSqlGenerator>();
             var sql = database.GetService<ISqlGenerationHelper>();
 
+#if CORE50
+            var operations = differ.GetDifferences(null, model.GetRelationalModel());
+#else
             var operations = differ.GetDifferences(null, model);
+#endif
             var commands = generator.Generate(operations, model);
 
             var builder = new StringBuilder();
@@ -85,7 +95,6 @@ namespace ReverseEngineer20
                 throw new ArgumentException("Unable to load project assembly");
             }
 
-            //TODO Use OperationHandler output!!
             var reporter = new OperationReporter(new OperationReportHandler());
 
             return new DbContextOperations(reporter, assembly, assembly, Array.Empty<string>());

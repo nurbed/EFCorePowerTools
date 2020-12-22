@@ -1,0 +1,28 @@
+﻿using ErikEJ.EntityFrameworkCore.SqlServer.Scaffolding;
+using Microsoft.EntityFrameworkCore.Design;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Scaffolding;
+using Microsoft.EntityFrameworkCore.SqlServer.Design.Internal;
+using Microsoft.EntityFrameworkCore.SqlServer.Diagnostics.Internal;
+using Microsoft.EntityFrameworkCore.SqlServer.Scaffolding.Internal;
+using Microsoft.EntityFrameworkCore.SqlServer.Storage.Internal;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.DependencyInjection;
+
+[assembly: DesignTimeProviderServices("ErikEJ.EntityFrameworkCore.SqlServer.Design.SqlServerDacpacDesignTimeServices")]
+
+namespace ErikEJ.EntityFrameworkCore.SqlServer.Design
+{
+    public class SqlServerDacpacDesignTimeServices : IDesignTimeServices
+    {
+        public virtual void ConfigureDesignTimeServices(IServiceCollection services)
+#pragma warning disable EF1001 // Internal EF Core API usage.
+            => services
+                .AddSingleton<LoggingDefinitions, SqlServerLoggingDefinitions>()
+                .AddSingleton<IRelationalTypeMappingSource, SqlServerTypeMappingSource>()
+                .AddSingleton<IDatabaseModelFactory, SqlServerDacpacDatabaseModelFactory>()
+                .AddSingleton<IProviderConfigurationCodeGenerator, SqlServerCodeGenerator>()
+                .AddSingleton<IAnnotationCodeGenerator, SqlServerAnnotationCodeGenerator>();
+#pragma warning restore EF1001 // Internal EF Core API usage.
+    }
+}

@@ -10,18 +10,26 @@
     public class ModelingOptionsModel : INotifyPropertyChanged
     {
         private bool _installNuGetPackage;
-        private int _selectedTobeGenerated;
+        private int _selectedToBeGenerated;
         private bool _includeConnectionString;
-        private bool _useHandelbars;
-        private bool _replaceId;
+        private bool _useHandlebars;
+        private int _selectedHandlebarsLanguage;
         private bool _usePluralizer;
         private bool _useDatabaseNames;
         private string _ns;
         private string _outputPath;
+        private string _outputContextPath;
+        private string _modelNamespace;
+        private string _contextNamespace;
         private string _modelName;
         private bool _useDataAnnotations;
         private string _projectName;
         private string _dacpacPath;
+        private bool _useDbContextSplitting;
+        private bool _mapSpatialTypes;
+        private bool _mapNodaTimeTypes;
+        private bool _useEf6Pluralizer;
+        private bool _useBoolPropertiesWithoutDefaultSql;
 
         public bool UseDataAnnotations
         {
@@ -52,6 +60,39 @@
             {
                 if (value == _outputPath) return;
                 _outputPath = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public string OutputContextPath
+        {
+            get => _outputContextPath;
+            set
+            {
+                if (value == _outputContextPath) return;
+                _outputContextPath = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public string ModelNamespace
+        {
+            get => _modelNamespace;
+            set
+            {
+                if (value == _modelNamespace) return;
+                _modelNamespace = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public string ContextNamespace
+        {
+            get => _contextNamespace;
+            set
+            {
+                if (value == _contextNamespace) return;
+                _contextNamespace = value;
                 OnPropertyChanged();
             }
         }
@@ -89,24 +130,35 @@
             }
         }
 
-        public bool ReplaceId
+        public bool UseDbContextSplitting
         {
-            get => _replaceId;
+            get => _useDbContextSplitting;
             set
             {
-                if (value == _replaceId) return;
-                _replaceId = value;
+                if (value == _useDbContextSplitting) return;
+                _useDbContextSplitting = value;
                 OnPropertyChanged();
             }
         }
 
-        public bool UseHandelbars
+        public bool UseHandlebars
         {
-            get => _useHandelbars;
+            get => _useHandlebars;
             set
             {
-                if (value == _useHandelbars) return;
-                _useHandelbars = value;
+                if (value == _useHandlebars) return;
+                _useHandlebars = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public int SelectedHandlebarsLanguage
+        {
+            get => _selectedHandlebarsLanguage;
+            set
+            {
+                if (value == _selectedHandlebarsLanguage) return;
+                _selectedHandlebarsLanguage = value;
                 OnPropertyChanged();
             }
         }
@@ -122,13 +174,13 @@
             }
         }
 
-        public int SelectedTobeGenerated
+        public int SelectedToBeGenerated
         {
-            get => _selectedTobeGenerated;
+            get => _selectedToBeGenerated;
             set
             {
-                if (value == _selectedTobeGenerated) return;
-                _selectedTobeGenerated = value;
+                if (value == _selectedToBeGenerated) return;
+                _selectedToBeGenerated = value;
                 OnPropertyChanged();
             }
         }
@@ -162,6 +214,50 @@
             {
                 if (value == _dacpacPath) return;
                 _dacpacPath = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool MapSpatialTypes
+        {
+            get => _mapSpatialTypes;
+            set
+            {
+                if (value == _mapSpatialTypes) return;
+                _mapSpatialTypes = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool MapNodaTimeTypes
+        {
+            get => _mapNodaTimeTypes;
+            set
+            {
+                if (value == _mapNodaTimeTypes) return;
+                _mapNodaTimeTypes = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool UseEf6Pluralizer
+        {
+            get => _useEf6Pluralizer;
+            set
+            {
+                if (value == _useEf6Pluralizer) return;
+                _useEf6Pluralizer = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public bool UseBoolPropertiesWithoutDefaultSql
+        {
+            get => _useBoolPropertiesWithoutDefaultSql;
+            set
+            {
+                if (value == _useBoolPropertiesWithoutDefaultSql) return;
+                _useBoolPropertiesWithoutDefaultSql = value;
                 OnPropertyChanged();
             }
         }

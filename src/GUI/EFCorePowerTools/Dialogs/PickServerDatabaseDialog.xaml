@@ -8,13 +8,14 @@
                  WindowStartupLocation="CenterOwner"
                  ResizeMode="NoResize" 
                  ShowInTaskbar="False"
+                 SizeToContent="WidthAndHeight"
                  mc:Ignorable="d" 
                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                  xmlns:viewModels="clr-namespace:EFCorePowerTools.ViewModels"
                  Loaded="Window_Loaded"
-                 Width="420"
-                 Height="200"
+                 MinWidth="420"
+                 MinHeight="200"
                  d:DataContext="{d:DesignInstance Type=viewModels:PickServerDatabaseViewModel, IsDesignTimeCreatable=False}">
 
     <i:Interaction.Triggers>
@@ -50,6 +51,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -74,32 +76,76 @@
                              Command="{Binding AddDatabaseConnectionCommand}"/>
         </Grid>
 
-        <TextBlock Grid.Row="1"
-                   Visibility="{Binding DatabaseDefinitions, Converter={StaticResource CollectionCountToVisibilityConverter}, Mode=OneWay}"
-                   Text="or SQL Server Database project (.dacpac)"/>
-        <ComboBox Grid.Row="2"
-                  Visibility="{Binding DatabaseDefinitions, Converter={StaticResource CollectionCountToVisibilityConverter}, Mode=OneWay}"
-                  TabIndex="3"
-                  Style="{StaticResource SourceSelectionComboBoxStyle}"
-                  ItemsSource="{Binding DatabaseDefinitions, Mode=OneWay}"
-                  SelectedItem="{Binding SelectedDatabaseDefinition, Mode=TwoWay}">
-            <ComboBox.ItemTemplate>
-                <DataTemplate>
-                    <TextBlock Text="{Binding FilePath, Converter={StaticResource FilePathToDisplayNameConverter}}"/>
-                </DataTemplate>
-            </ComboBox.ItemTemplate>
-        </ComboBox>
+        <TextBlock Grid.Row="1" Margin="10,0,0,0"
+                   Text="Choose SQL Server Database project (.dacpac)"/>
+
+        <Grid Grid.Row="2"
+              HorizontalAlignment="Stretch">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <ComboBox Grid.Column="0"
+                      Visibility="{Binding DatabaseDefinitions, Converter={StaticResource CollectionCountToVisibilityConverter}, Mode=OneWay}"
+                      TabIndex="4"
+                      Style="{StaticResource SourceSelectionComboBoxStyle}"
+                      ItemsSource="{Binding DatabaseDefinitions, Mode=OneWay}"
+                      SelectedItem="{Binding SelectedDatabaseDefinition, Mode=TwoWay}">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding FilePath, Converter={StaticResource FilePathToDisplayNameConverter}}"/>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+            <dw:DialogButton Grid.Column="1"
+                             TabIndex="2"
+                             Style="{StaticResource SourceSelectionButtonStyle}"
+                             Content="Add..."
+                             Command="{Binding AddDatabaseDefinitionCommand}"/>
+        </Grid>
+        
+        <StackPanel Grid.Row="3" 
+                    Orientation="Horizontal" 
+                    HorizontalAlignment="Left" 
+                    VerticalAlignment="Center">
+            <CheckBox x:Name="FilterSchemas" IsTabStop="False" IsChecked="{Binding FilterSchemas}">Filter schemas</CheckBox>
+        </StackPanel>
 
         <StackPanel Grid.Row="3"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
+                    VerticalAlignment="Center" 
+                    Margin="0,5">
+            <dw:DialogButton IsTabStop="False"
+                             Style="{StaticResource SourceSelectionButtonStyle}"
+                             Content="Schemas..."
+                             Command="{Binding FilterSchemasCommand}"/>
+        </StackPanel>
+
+        <StackPanel 
+            Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Left"
                     VerticalAlignment="Center">
-            <dw:DialogButton TabIndex="4"
+            <CheckBox x:Name="IncludeViews" 
+                      IsChecked="{Binding IncludeViews}" 
+                      TabIndex="6" 
+                      ToolTip="If unchecked, EF Core 3.1 will be used"
+                      Margin="0,5,0,0" >Use EF Core 5</CheckBox>
+        </StackPanel>
+
+        <StackPanel Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Margin="0,5,0,0">
+            <dw:DialogButton TabIndex="7"
                              Style="{StaticResource SourceSelectionButtonStyle}"
                              Content="OK"
                              IsDefault="True"
                              Command="{Binding OkCommand}"/>
-            <dw:DialogButton TabIndex="5"
+            <dw:DialogButton TabIndex="8"
                              Style="{StaticResource SourceSelectionButtonStyle}"
                              Content="Cancel"
                              Command="{Binding CancelCommand}"/>
